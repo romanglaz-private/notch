@@ -107,6 +107,7 @@ Document these once confirmed; tests are written against explicit expected behav
 | SMK-04 | Save succeeds             | Valid minimal config     | Save                    | Success toast/banner; network 2xx                                                  |
 | SMK-05 | Reload preserves          | After SMK-04             | Hard refresh            | Values match last saved                                                            |
 | SMK-06 | Auth gate                 | User without access      | Open deep link          | Redirect or 403 consistent with policy                                             |
+| SMK-07 | Accessibility smoke (optional PR gate) | Guardrails shell visible (after **SMK-02**) | **Tab** from load until first chip textbox or **Deploy** receives focus; **or** run axe — **0 critical** | No unintended focus trap on entry; baseline only — full catalog **§11** |
 
 
 ---
@@ -187,6 +188,8 @@ Document these once confirmed; tests are written against explicit expected behav
 | NEG-07 | Unicode edge                | Zero-width chars, RTL marks in subject | No crash; match behavior documented           |
 | NEG-08 | Network failure on save     | Simulate 500/timeout                   | Error UI; no partial silent loss              |
 | NEG-09 | Concurrent edit             | Two tabs save different configs        | Last-write-wins or conflict handling per spec |
+| NEG-10 | CSRF / forged mutating save | Replay or craft **POST/PUT** to settings save **without** valid CSRF token, `Origin`/`Referer` check, or framework equivalent (per stack) | **403/419/422** or silent no-op; **no** persisted rule change; aligns with **NFR-S-02** |
+| NEG-11 | Cookie / session abuse        | Tamper `HttpOnly` session cookie, fixation / session swap attempt, or cross-site cookie send on save | Session invalidated or request rejected; **no** cross-tenant or cross-user merge; aligns with **NFR-S-03** |
 
 
 ### Boundary table (data-driven candidates)
@@ -332,14 +335,25 @@ The default file runs **two** rows for **`PG-U-01`**: **`expectedResult` `true`*
 ## 11. Non-functional
 
 
-| ID        | Area          | Scenario                            | Tool / method         |
-| --------- | ------------- | ----------------------------------- | --------------------- |
-| NFR-P-01  | Performance   | Save with 200 keywords              | measure p95 save time |
-| NFR-P-02  | Performance   | Open page with large config         | TTI acceptable        |
-| NFR-A-11y | Accessibility | Tab order through all four sections | keyboard-only pass    |
-| NFR-A-11y | Labels        | Every input has accessible name     | axe                   |
-| NFR-S-01  | Security      | IDOR: another tenant/user ID in API | 403                   |
-| NFR-C-01  | Compatibility | Chrome, Safari, Firefox latest      | matrix                |
+| ID        | Area            | Scenario                                                                 | Tool / method                          |
+| --------- | --------------- | ------------------------------------------------------------------------ | -------------------------------------- |
+| NFR-P-01  | Performance     | Save with **200** keywords                                               | p95 save time (DevTools / APM / manual) |
+| NFR-P-02  | Performance     | Open page with **large** saved config                                    | TTI / LCP acceptable (Lighthouse / manual) |
+| NFR-P-03  | Load / capacity | **Sustained** load: N parallel operators or scripted saves/evals for T minutes without SLO breach | k6, Playwright sharded manual, or staging soak |
+| NFR-P-04  | Stress / spike  | **Spike** then **soak**: burst traffic or rapid save loops until errors/latency cross agreed threshold | k6 spike test; chaos / manual observation |
+| NFR-A-01  | Accessibility   | **Tab order** through all four Guardrails sections + Deploy/Save         | Keyboard-only pass                     |
+| NFR-A-02  | Accessibility   | **Labels / names**: every chip textbox, combobox, and primary button has accessible name | axe + spot DOM inspect                 |
+| NFR-A-03  | Accessibility   | **Contrast** (text + UI components) meets agreed WCAG target (e.g. **AA**) on Guardrails + Playground | axe color-contrast; manual where tools gap |
+| NFR-A-04  | Accessibility   | **Zoom 200%**: layout usable; no clipped critical controls                 | Browser zoom manual                    |
+| NFR-A-05  | Accessibility   | **`prefers-reduced-motion`**: core flows usable; motion respects OS      | manual (forced reduced motion)         |
+| NFR-A-06  | Accessibility   | **Screen reader** spot smoke (NVDA / VoiceOver): headings, chip add, save result | Manual 30–60 min charter               |
+| NFR-A-07  | Accessibility   | **Visible focus** on chip inputs, channel combo, composer, Deploy        | Keyboard tab/shift-tab               |
+| NFR-A-08  | Accessibility   | **Focus trap** in dialogs / overlays; **Esc** returns focus predictably    | Keyboard                             |
+| NFR-A-09  | Accessibility   | Save / validation errors exposed to assistive tech (**live region** or `aria-describedby`) | SR + DOM inspect                       |
+| NFR-S-01  | Security        | **IDOR**: another tenant/user ID in settings API                         | Expect **403**; automated or Burp-style |
+| NFR-S-02  | Security        | **CSRF** protections on mutating save — detailed steps **NEG-10**      | OWASP ZAP / framework logs / manual replay |
+| NFR-S-03  | Security        | **Cookie / session**: `HttpOnly` / `Secure` / `SameSite` on auth; rotation on logout; no sensitive data in `localStorage` when avoidable | DevTools Application tab; sec review |
+| NFR-C-01  | Compatibility   | Chrome, Safari, Firefox latest                                         | Browser matrix                         |
 
 
 ---
@@ -375,7 +389,7 @@ Implemented in repo: `**tests/e2e.spec.ts`** — one test, two steps: (1) apply 
 | Tier | Includes                                                                                            |
 | ---- | --------------------------------------------------------------------------------------------------- |
 | P0   | SMK-01..05, FUN-X-01, FUN-E-01, FUN-S-01, FUN-U-01, FUN-A-01, NEG-01, NEG-08, INT-01, SEC/auth gate |
-| P1   | All remaining FUN-* per pillar, NEG-02..07, FUN-X-02..03, E2E-01                                    |
+| P1   | All remaining FUN-* per pillar, NEG-02..11, FUN-X-02..03, E2E-01                                    |
 | P2   | Pairwise matrix, NFR-*, exploratory charters, CH-*                                                  |
 
 
@@ -387,6 +401,7 @@ Implemented in repo: `**tests/e2e.spec.ts`** — one test, two steps: (1) apply 
 - Data-driven matrices **E1–E5, S1–S3, U1–U3, A1–A2** executed at least once per release candidate.
 - No open **P0** defects for save, auth, or evaluation correctness.
 - Traceability: each critical user story links to at least one test ID in this document.
+- Non-functional backlog: **NFR-P-03/P-04** (load/stress), **NFR-S-02/S-03** + **NEG-10/NEG-11**, and **NFR-A-01–A-09** (a11y depth) run or **waived with sign-off** per release policy.
 
 ---
 
@@ -411,4 +426,4 @@ Google OAuth cannot be scripted safely in CI; use a **one-time manual login**, t
 
 **How tests use it:** `playwright.config.ts` sets `use.storageState` when `playwright/.auth/storage-state.json` exists (or use `PLAYWRIGHT_STORAGE_STATE` for a custom path).
 
-**Security:** Never commit `storage-state.json`; rotate by deleting the file and running `npm run auth:save` again.
+**Security (automation vs product):** Never commit `storage-state.json`; rotate by deleting the file and running `npm run auth:save` again. That rule protects **CI secrets** — it does **not** replace product checks **NEG-11** / **NFR-S-03** (session cookie flags, fixation, tamper response).
