@@ -1,3 +1,6 @@
+# IDE / editor local config
+.cursor/
+.vscode/
 
 # Playwright
 node_modules/
