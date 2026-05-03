@@ -1,0 +1,12 @@
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+
+# Local Chrome profiles used by auth:save / prior analysis scripts
+.auth-playwright-chrome/
+.auth-profile/

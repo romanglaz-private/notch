@@ -1,0 +1,30 @@
+{
+  "scenarios": [
+    {
+      "testCaseId": "PG-U-01",
+      "id": "§9.A — words in user message: negative control (no forbidden token in usersMessage) → assistant answers",
+      "emailPatternsToUnassign": ["roman-pw-{{RUN_ID}}"],
+      "subjectToUnassign": ["forbidden-subject-line-{{RUN_ID}}"],
+      "wordsInUserMessage": ["forbidden-word-in-customer-message-{{RUN_ID}}"],
+      "wordsInAIReply": ["forbidden-word-in-assistant-reply-{{RUN_ID}}"],
+      "userEmail": "playground-negative-control-{{RUN_ID}}@example.invalid",
+      "userSubject": null,
+      "userChannel": "Chat",
+      "usersMessage": "Neutral question about the product.",
+      "expectedResult": true
+    },
+    {
+      "testCaseId": "PG-U-01",
+      "id": "§9.A — words in user message: positive match (usersMessage contains forbidden token) → blocked signal",
+      "emailPatternsToUnassign": ["roman-pw-{{RUN_ID}}"],
+      "subjectToUnassign": ["forbidden-subject-line-{{RUN_ID}}"],
+      "wordsInUserMessage": ["forbidden-word-in-customer-message-{{RUN_ID}}"],
+      "wordsInAIReply": ["forbidden-word-in-assistant-reply-{{RUN_ID}}"],
+      "userEmail": "hit-block-{{RUN_ID}}@example.invalid",
+      "userSubject": null,
+      "userChannel": "Chat",
+      "usersMessage": "Hello please help with forbidden-word-in-customer-message-{{RUN_ID}} thanks.",
+      "expectedResult": false
+    }
+  ]
+}

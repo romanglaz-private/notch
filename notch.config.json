@@ -1,0 +1,9 @@
+{
+  "baseUrl": "https://guardio.app.getnotch.dev",
+  "featurePath": "/settings/customization/escalation",
+  "policyVersion": "MS-18APRIL-181153",
+  "e2e": {
+    "testsPlaygroundPath": "/tests/playground",
+    "guardrailsPath": "/config/guardrails"
+  }
+}
