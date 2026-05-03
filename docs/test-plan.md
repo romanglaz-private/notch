@@ -8,6 +8,7 @@
 | Feature URL   | `https://guardio.app.getnotch.dev/settings/customization/escalation` (canonical values: repo root `notch.config.json` — `baseUrl` + `featurePath`; used by Playwright and `npm run auth:save`) |
 | Product scope | Automation Audit: **Email patterns**, **Subject**, **Words in user message**, **Words in assistant reply**                                                                                     |
 | Goal          | Prove configuration correctness, evaluation correctness (no false positives/negatives), safe UX, and stable non-functional behavior under realistic and adversarial data.                      |
+| **Match semantics (index)** | **§4** — contains, starts-with, ends-with, regexp, whole-word, glob; verification tokens (**PG**, **PG (Email)**, etc.) in **§8** and **§9.A**. |
 
 
 ## 2. Scope pillars → coverage map (traceability)
@@ -48,11 +49,46 @@ Each pillar must be covered by **smoke**, **functional**, **negative/boundary**,
 | **Chaos / resilience**       | Offline save, 429/503 from API                                          | Manual or automated with mocks                      |
 
 
-## 4. Assumptions (to confirm with product)
+## 4. Match semantics, pattern types & assumptions
+
+Single index for **contains**, **starts-with**, **ends-with**, **regexp**, and related vocabulary. Detailed matrix rows with **Match type** and **Verify via** are in **§8**; Playground-aligned cases are in **§9.A**. Lock expected behavior with product before treating **regexp** / **starts-with** / **ends-with** as mandatory acceptance criteria.
+
+### 4.1 Pattern vocabulary
+
+| Semantic (QA / product language) | Meaning | Where this plan covers it |
+| -------------------------------- | ------- | --------------------------- |
+| **Contains** (substring) | Token appears anywhere in the evaluated string (unless whole-word mode applies). | **FUN-S-01**, **FUN-U-01**, **FUN-A-03**; **§8.2** S1, **§8.3** U1, **§8.4** A1; **§9.A** PG-E / PG-S / PG-U. |
+| **Starts-with** (prefix) | Evaluated string (or normalized form) begins with the pattern. | **§4.2** **MS-P-***; extend **§8** when UI documents prefix rules. |
+| **Ends-with** (suffix) | Evaluated string ends with the pattern after normalization (e.g. domain class on sender). | **§4.2** **MS-S-***; **FUN-E-02**, **§8.1** (`*@host` as glob / domain-suffix style). |
+| **Regexp** | Regular-expression grammar (full or subset) **per field**, if the product exposes it. | **§4.2** **MS-R-***; confirm anchors, escaping, ReDoS limits with PM. |
+| **Whole word** | Word-boundary match (not substring inside a larger token). | **§8.2** S2, **§8.3** U2. |
+| **Glob / wildcard** | Pattern syntax such as `*` in email rules (may not be full regexp). | **FUN-E-02**; **§8.1** E1–E2. |
+
+### 4.2 Match-semantics testcase IDs (traceability)
+
+Use in Jira / sheets; add concrete rows to **§8** when spec is locked.
+
+| ID | Match type | Pillar | Example pattern | Example input | Expected (lock with product) |
+| --- | --- | --- | --- | --- | --- |
+| **MS-C-01** | Contains | User message | `angry` | `I am angry` | Match |
+| **MS-C-02** | Contains | Subject | `urgent` | `URGENT billing` | Match if case-insensitive (**§8.2** S3) |
+| **MS-C-03** | Contains | Assistant reply | `policy` | `Per company policy…` | Match (**§8.4** A1) |
+| **MS-W-01** | Whole word | User message | `cancel` | `scancel` | Per **§8.3** U2 |
+| **MS-W-02** | Whole word | Subject | `refund` | `refundability` | Per **§8.2** S2 |
+| **MS-P-01** | Starts-with | Subject | (e.g. `Re:`) | Subject beginning with prefix | Per spec |
+| **MS-P-02** | Starts-with | Email / sender | (product-specific) | Sender local-part prefix | Per spec; align **FUN-E-01** |
+| **MS-S-01** | Ends-with / domain class | Email | `*@vendor.com` | `user@vendor.com` | Match (**§8.1** E1) |
+| **MS-S-02** | Ends-with / domain class | Email | `*@vendor.com` | `user@vendor.org` | No match (**§8.1** E2) |
+| **MS-R-01** | Regexp | Email | e.g. anchored sender pattern | Matching / non-matching senders | Per regex mode |
+| **MS-R-02** | Regexp | Subject | e.g. `\[Ticket#\d+\]` | With / without tag | Per regex mode |
+| **MS-R-03** | Regexp | User message | minimal safe pattern | Body variants | Per regex mode; safety (no ReDoS) |
+| **MS-R-04** | Regexp | Assistant reply | minimal safe pattern | Assistant path | Pair **PG-A-01** |
+
+### 4.3 Assumptions (to confirm with product)
 
 Document these once confirmed; tests are written against explicit expected behavior.
 
-1. **Match semantics**: substring vs whole word vs regex per field.
+1. **Match semantics**: for **each** pillar, confirm **contains (substring)** vs **whole word** vs **regexp**; confirm whether **starts-with** and **ends-with** are first-class in the UI or only emergent (e.g. wildcard domain = suffix on host part).
 2. **Case sensitivity**: default insensitive unless stated.
 3. **Combination logic**: AND vs OR across pillars; order of precedence if mixed.
 4. **Evaluation context**: live conversations only vs historical replay; email channel vs chat.
@@ -170,50 +206,63 @@ Document these once confirmed; tests are written against explicit expected behav
 
 Use one parameterized test per matrix (Playwright: `test.describe` + array of cases, or CSV fixture).
 
+### Verification surface (legend)
+
+Use these tokens in the **Verify via** column in **§8** and in **§9.A** so **expected result** is always paired with **where** it is proven (Playground send vs not).
+
+| Code | Meaning |
+| --- | --- |
+| **PG** | **Tests → Playground**: Guardrails chips → Deploy → **Send as customer** → assert assistant reply vs blocked / failure UI. |
+| **PG (Email)** | Playground with **Channel = Email** (sender + subject visible to evaluation). |
+| **PG (Chat)** | Playground with **Channel = Chat** (typical for user-message rules without Email-only fields). |
+| **API** | Settings GET/PUT or evaluation contract **without** a Playground send. |
+| **Inbox / fixture** | Real or canned thread (**INT-02**, **E2E-01**), not the Playground composer. |
+| **—** | Not applicable, save-only / persistence check, or **fixme** until the surface is reliable. |
+
 ### 8.1 Email pattern — equivalence classes
 
 
-| `#` | pattern            | sample_sender          | should_match    |
-| --- | ------------------ | ---------------------- | --------------- |
-| E1  | `*@acme.com`       | `u@acme.com`           | true            |
-| E2  | `*@acme.com`       | `u@other.com`          | false           |
-| E3  | `support@acme.com` | `support@acme.com`     | true            |
-| E4  | `support@acme.com` | `support+tag@acme.com` | per spec        |
-| E5  | empty              | any                    | false / blocked |
+| `#` | pattern            | sample_sender          | should_match    | Match type | Verify via |
+| --- | ------------------ | ---------------------- | --------------- | ---------- | ---------- |
+| E1  | `*@acme.com`       | `u@acme.com`           | true            | glob / domain class (ends-with host) | **PG (Email)** |
+| E2  | `*@acme.com`       | `u@other.com`          | false           | glob / domain class | **PG (Email)** |
+| E3  | `support@acme.com` | `support@acme.com`     | true            | literal / full-string match | **PG (Email)**; **API** |
+| E4  | `support@acme.com` | `support+tag@acme.com` | per spec        | per spec (plus-tag normalization) | **PG (Email)**; **API** |
+| E5  | empty              | any                    | false / blocked | invalid / empty pattern | **API**; **—** |
 
 
 ### 8.2 Subject keyword — substring vs word (clarify spec then lock expected)
 
 
-| `#` | keywords | subject_line         | expected                                     |
-| --- | -------- | -------------------- | -------------------------------------------- |
-| S1  | `refund` | `Request for refund` | match                                        |
-| S2  | `refund` | `refundability`      | match only if substring; false if whole-word |
-| S3  | `urgent` | `URGENT help`        | match if case-insensitive                    |
+| `#` | keywords | subject_line         | expected                                     | Match type | Verify via |
+| --- | -------- | -------------------- | -------------------------------------------- | ---------- | ---------- |
+| S1  | `refund` | `Request for refund` | match                                        | contains (substring) | **PG (Email)** |
+| S2  | `refund` | `refundability`      | match only if substring; false if whole-word | contains vs whole-word | **PG (Email)** |
+| S3  | `urgent` | `URGENT help`        | match if case-insensitive                    | contains + case | **PG (Email)** |
 
 
 ### 8.3 User message words
 
 
-| `#` | words         | body_snippet         | expected               |
-| --- | ------------- | -------------------- | ---------------------- |
-| U1  | `cancel`      | `I want to cancel`   | match                  |
-| U2  | `cancel`      | `scancel`            | per word-boundary spec |
-| U3  | `charge back` | `charge back please` | phrase vs two tokens   |
+| `#` | words         | body_snippet         | expected               | Match type | Verify via |
+| --- | ------------- | -------------------- | ---------------------- | ---------- | ---------- |
+| U1  | `cancel`      | `I want to cancel`   | match                  | contains | **PG (Chat)** or **PG (Email)** |
+| U2  | `cancel`      | `scancel`            | per word-boundary spec | whole-word vs contains | **PG (Chat)** or **PG (Email)** |
+| U3  | `charge back` | `charge back please` | phrase vs two tokens   | contains / phrase | **PG (Chat)** or **PG (Email)** |
 
 
 ### 8.4 Assistant reply words
 
 
-| `#` | words    | assistant_text                      | expected                      |
-| --- | -------- | ----------------------------------- | ----------------------------- |
-| A1  | `policy` | `Per company policy...`             | match                         |
-| A2  | `policy` | user-only message contains `policy` | false for assistant-only rule |
+| `#` | words    | assistant_text                      | expected                      | Match type | Verify via |
+| --- | -------- | ----------------------------------- | ----------------------------- | ---------- | ---------- |
+| A1  | `policy` | `Per company policy...`             | match                         | contains | **PG** |
+| A2  | `policy` | user-only message contains `policy` | false for assistant-only rule | contains (user vs assistant scope) | **PG** |
 
 
 ### 8.5 Pairwise sample (subject × user word × email) — reduce suite size
 
-Pick representative pairs (tools: PICT, ACTS, or manual 10–15 rows) so each value of each factor appears with varied partners.
+Pick representative pairs (tools: PICT, ACTS, or manual 10–15 rows) so each value of each factor appears with varied partners. When authoring rows, add **Match type** and **Verify via** using the same legend as **§8.1–8.4** (prefer **PG (Email)** when the row includes subject or sender).
 
 ---
 
@@ -236,15 +285,16 @@ Pick representative pairs (tools: PICT, ACTS, or manual 10–15 rows) so each va
 
 **Pass signal (negative control — guardrail must *not* fire):** same Playground surface, but customer identity / subject / body is chosen so **no** rule matches; assistant produces a normal reply (e.g. helpful paragraph), and the failure banner / Action Selector error does **not** appear. *Example (manual narrative):* configure **Emails patterns to unassign** for `roman@gmail.com` (or a substring that only that address contains); in Playground, `**roman@yahoo.com`** should get an AI answer; `**roman@gmail.com**` should be blocked with Reasoning ✕ / failure copy — automation uses unique `roman-pw-<ts>@…` / `other-user-<ts>@yahoo…` tokens for isolation.
 
+**Verification surface:** use the same **Verify via** codes as **§8** (**PG**, **PG (Email)**, **PG (Chat)**, **API**, **Inbox / fixture**, **—**). Each **expected outcome** below names **what** should happen and **where** it must be observed.
 
-| ID      | Field(s) under test        | Negative control (no match)                                                                                  | Positive (match → blocked)                                                                                                                                       |
-| ------- | -------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PG-E-01 | Email patterns to unassign | Playground **Email**; sender **does not** contain pattern → assistant answers (**automated**)                | `**PG-E-02` `fixme`:** sender **contains** pattern → failure banner / Reasoning ✕ (enable when Playground honors Automation Audit email patterns on your tenant) |
-| PG-S-01 | Subjects                   | Chip smoke: keyword added + Deploy (Playground subject pair tracked for future / `fixme` where tenant flaky) | Playground **Email**; subject contains keyword → blocked signal                                                                                                  |
-| PG-U-01 | Words in user message      | Playground message **without** forbidden word → assistant answers (**automated**)                            | Message **contains** forbidden word → blocked signal (**automated**)                                                                                             |
-| PG-A-01 | Words in assistant's reply | —                                                                                                            | Forbidden token only in model reply path — `**fixme`** until wording is deterministic                                                                            |
-| PG-X-01 | Email + user (sequence)    | Chip smoke: both chips + Deploy                                                                              | Full Playground combo → `**fixme**` where subject/email evaluation order varies                                                                                  |
-| PG-X-02 | Subject + user (sequence)  | —                                                                                                            | `**fixme**` — subject-only hit on Playground varies by tenant                                                                                                    |
+| ID | Field(s) under test | Match semantics | Negative — expected outcome | Negative — verify via | Positive — expected outcome | Positive — verify via |
+| --- | --- | --- | --- | --- | --- | --- |
+| PG-E-01 | Email patterns to unassign | Sender / pattern **contains** or domain-class match per **§8.1** | Sender does **not** match pattern → assistant answers | **PG (Email)** (**automated** where tenant stable) | Sender matches pattern → blocked / failure UI (**PG-E-02**) | **PG (Email)** — **`fixme`** until Playground consistently honors Automation Audit email patterns on tenant |
+| PG-S-01 | Subjects | Subject line **contains** keyword (substring) unless whole-word mode | Keyword on chips + Deploy; subject does **not** contain keyword → assistant answers | **PG (Email)**; **API** for save round-trip | Subject **contains** keyword → blocked signal | **PG (Email)** |
+| PG-U-01 | Words in user message | User message **contains** token (substring vs whole-word per **§8.3**) | Message **without** forbidden token → assistant answers | **PG (Chat)** (**automated**) | Message **contains** forbidden token → blocked signal | **PG (Chat)** (**automated**) |
+| PG-A-01 | Words in assistant's reply | Assistant text **contains** token; not user-only | — | **—** | Forbidden token appears only on assistant path → blocked | **PG** — **`fixme`** until model wording is deterministic |
+| PG-X-01 | Email + user (sequence) | **Contains** / multi-pillar AND semantics per product | Both chips + Deploy; inputs chosen so neither rule fires → assistant answers | **PG** | Inputs satisfy both rules → blocked | **PG** — **`fixme`** if evaluation order varies by tenant |
+| PG-X-02 | Subject + user (sequence) | **Contains** on subject and body | — | **—** | Subject-only or combo hit → blocked | **PG** — **`fixme`** (tenant variance) |
 
 
 **Playwright data matrix** (`tests/data/guardrails-playground-matrix.json`): root is **`scenarios[]`** only. Each object is one automated test and must include:
@@ -315,7 +365,7 @@ The default file runs **two** rows for **`PG-U-01`**: **`expectedResult` `true`*
 4. Separate **API-level** tests if evaluation endpoint exists (faster than UI).
 5. Tag tests: `@smoke`, `@rules`, `@nfr` for selective CI.
 
-Implemented in repo: `**tests/e2e.spec.ts`** — one test, two steps: (1) apply `**guardrails**` chip lists from `**tests/data/guardrails-playground-matrix.json**`, (2) `**playground**` send + `**expectPass**` assertion (`GuardrailsPage`, `PlaygroundPage`). Loader `**tests/data/guardrail-playground-matrix.ts**`; helpers `**src/utils/**`, `**tests/utils/**`. `**notch.config.json**`: `policyVersion`, `e2e.guardrailsPath`, `e2e.testsPlaygroundPath`, `e2e.guardrailsPlaygroundMatrixPath`, etc. `**testMatch`: `**/e2e.spec.ts**`.
+Implemented in repo: `**tests/e2e.spec.ts`** — one test, two steps: (1) apply `**guardrails**` chip lists from `**tests/data/guardrails-playground-matrix.json**`, (2) `**playground**` send + assert **`expectedResult`** (`GuardrailsPage`, `PlaygroundPage`). Loader `**tests/data/guardrail-playground-matrix.ts**`; helpers `**src/utils/**`, `**tests/utils/**`. `**notch.config.json**`: `policyVersion`, `e2e.guardrailsPath`, `e2e.testsPlaygroundPath`, `e2e.guardrailsPlaygroundMatrixPath`, etc. `**testMatch`: `**/e2e.spec.ts**`.
 
 ---
 

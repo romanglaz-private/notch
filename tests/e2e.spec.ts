@@ -15,7 +15,6 @@ const dataFilePath = resolvedGuardrailsPlaygroundMatrixPath(loadNotchConfig());
 const matrix = loadGuardrailsMatrixFile(dataFilePath);
 
 test.describe('Guardrails → Playground', () => {
-  test.describe.configure({ mode: 'serial', timeout: 600_000 });
 
   test.beforeEach(() => {
     test.skip(
