@@ -57,7 +57,7 @@ Session is stored for reuse by Playwright (cookies + storage for the app origins
 5. Run tests:
 
    ```bash
-   npm test
+   npm run test
    ```
 
 Override storage state path:
